@@ -15,7 +15,7 @@ def test_workflow_uses_node_24_ready_actions():
     text = WORKFLOW.read_text()
 
     assert "actions/checkout@v6" in text
-    assert "astral-sh/setup-uv@v8" in text
+    assert "astral-sh/setup-uv@v8.1.0" in text
     assert "actions/checkout@v4" not in text
     assert "astral-sh/setup-uv@v5" not in text
 
