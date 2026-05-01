@@ -241,17 +241,26 @@ def main(state_path: Path | None = None):
     state_path = state_path or DEFAULT_STATE_PATH
     try:
         state = read_state(state_path)
+        _log(f"state_loaded last_seen_sha={state['last_seen_sha']}")
         gh_token = os.environ.get("GH_TOKEN")
         commits = fetch_new_commits(UPSTREAM_REPO, UPSTREAM_BRANCH, state["last_seen_sha"], gh_token)
+        _log(f"commits_found={len(commits)}")
         if not commits:
+            _log("no_new_commits")
             return 0
 
         bundle = fetch_diff_and_context(UPSTREAM_REPO, commits, gh_token)
         latest_commit = commits[-1]
         now = _now_iso()
+        _log(
+            "diff_context "
+            f"files={bundle['num_files']} bytes={bundle['total_bytes']} latest_sha={latest_commit['sha']}"
+        )
 
         if should_skip(bundle["num_files"], bundle["total_bytes"]):
+            _log("skip_rule_triggered")
             write_state(state_path, latest_commit["sha"], now)
+            _log(f"state_advanced sha={latest_commit['sha']}")
             return 0
 
         messages = build_prompt(
@@ -262,11 +271,15 @@ def main(state_path: Path | None = None):
         )
         raw = call_llm(messages, os.environ["ANTHROPIC_API_KEY"])
         parsed = parse_llm_response(raw)
+        findings_count = len(parsed["findings"])
+        _log(f"llm_result has_issues={parsed['has_issues']} findings={findings_count}")
 
         if parsed["has_issues"]:
             subject, body = render_email(
                 parsed["findings"], parsed["summary"], latest_commit, repo=UPSTREAM_REPO
             )
+            masked_recipient = _mask_email(os.environ["RECIPIENT_EMAIL"])
+            _log(f"email_send_start to={masked_recipient} findings={findings_count}")
             send_email(
                 SMTP_HOST,
                 SMTP_PORT,
@@ -276,12 +289,26 @@ def main(state_path: Path | None = None):
                 subject,
                 body,
             )
+            _log(f"email_send_success to={masked_recipient}")
 
         write_state(state_path, latest_commit["sha"], now)
+        _log(f"state_advanced sha={latest_commit['sha']}")
         return 0
     except Exception as exc:
         print(f"openlab-watcher failed: {exc}", file=sys.stderr)
         return 1
+
+
+def _log(message):
+    print(f"openlab-watcher: {message}", flush=True)
+
+
+def _mask_email(address):
+    local, separator, domain = address.partition("@")
+    if not separator:
+        return "***"
+    prefix = local[:1] or "*"
+    return f"{prefix}***@{domain}"
 
 
 def _now_iso():
