@@ -121,7 +121,3 @@ Run only workflow structure checks:
 ```bash
 uv run pytest tests/test_workflow.py
 ```
-
-## License
-
-MIT. See `LICENSE`.
