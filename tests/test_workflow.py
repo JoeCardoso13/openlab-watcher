@@ -11,6 +11,14 @@ def test_workflow_can_write_state_back_to_repo():
     assert "contents: write" in text
 
 
+def test_workflow_scans_thursday_at_9am_central():
+    text = WORKFLOW.read_text()
+
+    assert 'cron: "0 14 * * 4"' in text
+    assert "workflow_dispatch" in text
+    assert "central-time" not in text
+
+
 def test_workflow_uses_node_24_ready_actions():
     text = WORKFLOW.read_text()
 

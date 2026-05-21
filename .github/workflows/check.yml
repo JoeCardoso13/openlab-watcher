@@ -2,7 +2,8 @@ name: Check openLab
 
 on:
   schedule:
-    - cron: "0 */4 * * *"
+    # GitHub schedules are UTC. This is Thursday 9 AM Central during daylight saving time.
+    - cron: "0 14 * * 4"
   workflow_dispatch:
 
 jobs:

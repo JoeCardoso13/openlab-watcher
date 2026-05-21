@@ -17,7 +17,7 @@ Every scheduled run:
 7. Sends an email only if Claude returns `has_issues: true`.
 8. Advances `state.json` and commits it back to this repository from GitHub Actions.
 
-The scheduled workflow runs every four hours and can also be triggered manually from GitHub Actions.
+The scheduled workflow scans once a week, Thursday at 9(ish) AM Central time (+/- daylight saving), and can also be triggered manually from GitHub Actions.
 
 ## Repository Context
 
