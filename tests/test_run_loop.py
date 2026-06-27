@@ -151,6 +151,77 @@ def test_llm_with_issues_sends_email_and_advances_state(monkeypatch, state_path)
     assert new_state["last_seen_sha"] == commits[-1]["sha"]
 
 
+def test_serial_increments_and_persists_when_email_sent(monkeypatch, tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text(
+        json.dumps({"last_seen_sha": "olds123", "last_run": "ts", "email_count": 47})
+    )
+    commits = _two_commits()
+    monkeypatch.setattr(check, "fetch_new_commits", lambda *a, **kw: commits)
+    monkeypatch.setattr(check, "fetch_diff_and_context", lambda *a, **kw: _diff_bundle())
+    monkeypatch.setattr(check, "build_prompt", lambda *a, **kw: [{"role": "user", "content": []}])
+    monkeypatch.setattr(check, "call_llm", lambda *a, **kw: object())
+    monkeypatch.setattr(check, "parse_llm_response", lambda raw: _llm_with_issues())
+
+    sent = {}
+
+    def fake_send(host, port, user, password, to_addr, subject, body):
+        sent["subject"] = subject
+
+    monkeypatch.setattr(check, "send_email", fake_send)
+
+    rc = check.main(state_path=p)
+
+    assert rc == 0
+    assert "openLab Watcher" in sent["subject"]
+    assert "#48" in sent["subject"]
+    assert json.loads(p.read_text())["email_count"] == 48
+
+
+def test_serial_unchanged_when_no_email_sent(monkeypatch, tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text(
+        json.dumps({"last_seen_sha": "olds123", "last_run": "ts", "email_count": 47})
+    )
+    commits = _two_commits()
+    monkeypatch.setattr(check, "fetch_new_commits", lambda *a, **kw: commits)
+    monkeypatch.setattr(check, "fetch_diff_and_context", lambda *a, **kw: _diff_bundle())
+    monkeypatch.setattr(check, "build_prompt", lambda *a, **kw: [{"role": "user", "content": []}])
+    monkeypatch.setattr(check, "call_llm", lambda *a, **kw: object())
+    monkeypatch.setattr(check, "parse_llm_response", lambda raw: _llm_clean())
+    monkeypatch.setattr(check, "send_email", MagicMock())
+
+    rc = check.main(state_path=p)
+
+    assert rc == 0
+    assert json.loads(p.read_text())["email_count"] == 47
+
+
+def test_serial_not_burned_when_send_fails(monkeypatch, tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text(
+        json.dumps({"last_seen_sha": "olds123", "last_run": "ts", "email_count": 47})
+    )
+    commits = _two_commits()
+    monkeypatch.setattr(check, "fetch_new_commits", lambda *a, **kw: commits)
+    monkeypatch.setattr(check, "fetch_diff_and_context", lambda *a, **kw: _diff_bundle())
+    monkeypatch.setattr(check, "build_prompt", lambda *a, **kw: [{"role": "user", "content": []}])
+    monkeypatch.setattr(check, "call_llm", lambda *a, **kw: object())
+    monkeypatch.setattr(check, "parse_llm_response", lambda raw: _llm_with_issues())
+
+    def boom(*a, **kw):
+        raise RuntimeError("smtp connection refused")
+
+    monkeypatch.setattr(check, "send_email", boom)
+
+    rc = check.main(state_path=p)
+
+    assert rc != 0
+    state = json.loads(p.read_text())
+    assert state["email_count"] == 47
+    assert state["last_seen_sha"] == "olds123"
+
+
 def test_github_error_exits_nonzero_and_state_unchanged(monkeypatch, state_path):
     def boom(*a, **kw):
         raise RuntimeError("github is down")

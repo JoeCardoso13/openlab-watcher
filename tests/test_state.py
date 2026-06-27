@@ -23,6 +23,25 @@ def test_read_state_missing_file_returns_initial_state(tmp_path: Path):
 
     assert state["last_seen_sha"] is None
     assert state["last_run"] is None
+    assert state["email_count"] == 0
+
+
+def test_read_state_defaults_email_count_for_legacy_files(tmp_path: Path):
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({"last_seen_sha": "abc1234", "last_run": "2026-05-01T00:00:00Z"}))
+
+    state = check.read_state(p)
+
+    assert state["email_count"] == 0
+
+
+def test_write_state_persists_email_count(tmp_path: Path):
+    p = tmp_path / "state.json"
+
+    check.write_state(p, "deadbee", "2026-05-01T01:23:45Z", email_count=48)
+
+    payload = json.loads(p.read_text())
+    assert payload["email_count"] == 48
 
 
 def test_write_state_persists_round_trip(tmp_path: Path):

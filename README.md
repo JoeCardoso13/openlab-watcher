@@ -14,7 +14,7 @@ Every scheduled run:
 4. Fetches the diff, edited markdown files, nearby sibling filenames, sidebar/navbar files, and a compact repository tree.
 5. Skips bulk changes above the configured file/byte thresholds.
 6. Sends the change context to Claude using a forced structured-output tool.
-7. Sends an email only if Claude returns `has_issues: true`.
+7. Sends an email only if Claude returns `has_issues: true`. Each email subject is `[openLab Watcher] #<n>`, where `<n>` is a serial number that increments by one per delivered email so the recipient can see the order at a glance.
 8. Advances `state.json` and commits it back to this repository from GitHub Actions.
 
 The scheduled workflow scans once a week, Thursday at 9(ish) AM Central time (+/- daylight saving), and can also be triggered manually from GitHub Actions.
@@ -88,14 +88,14 @@ GH_TOKEN=...
 
 ## Operational Notes
 
-`state.json` is the production cursor. It contains the last upstream openLab commit SHA that was reviewed. If you need to force a known commit to be reviewed again, set `last_seen_sha` to the upstream commit immediately before it, commit that state change, and manually run the workflow.
+`state.json` is the production cursor. It contains the last upstream openLab commit SHA that was reviewed (`last_seen_sha`) and `email_count`, the running serial used for email subjects. The serial only advances when an email is actually delivered, so consecutive emails are numbered consecutively. If you need to force a known commit to be reviewed again, set `last_seen_sha` to the upstream commit immediately before it, commit that state change, and manually run the workflow.
 
 The run logs intentionally include minimal diagnostics:
 
 ```text
 openlab-watcher: commits_found=...
 openlab-watcher: llm_result has_issues=... findings=...
-openlab-watcher: email_send_success to=d***@example.com
+openlab-watcher: email_send_success to=d***@example.com serial=...
 ```
 
 Recipient addresses are masked in logs. Secrets are never printed.

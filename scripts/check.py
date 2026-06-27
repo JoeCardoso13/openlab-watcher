@@ -34,19 +34,25 @@ class MalformedLLMResponse(ValueError):
 def read_state(path):
     path = Path(path)
     if not path.exists():
-        return {"last_seen_sha": None, "last_run": None}
+        return {"last_seen_sha": None, "last_run": None, "email_count": 0}
 
     payload = json.loads(path.read_text())
     return {
         "last_seen_sha": payload.get("last_seen_sha"),
         "last_run": payload.get("last_run"),
+        "email_count": payload.get("email_count", 0),
     }
 
 
-def write_state(path, sha, ts):
+def write_state(path, sha, ts, email_count=0):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"last_seen_sha": sha, "last_run": ts}, indent=2) + "\n")
+    path.write_text(
+        json.dumps(
+            {"last_seen_sha": sha, "last_run": ts, "email_count": email_count}, indent=2
+        )
+        + "\n"
+    )
 
 
 def fetch_new_commits(repo, branch, since_sha, gh_token):
@@ -199,9 +205,8 @@ def parse_llm_response(raw):
     raise MalformedLLMResponse("model did not call report_findings")
 
 
-def render_email(findings, summary, latest_commit, repo):
-    short_sha = latest_commit.get("short_sha") or latest_commit.get("sha", "")[:7]
-    subject = f"openLab consistency notes for {short_sha}"
+def render_email(findings, summary, latest_commit, repo, serial):
+    subject = f"[openLab Watcher] #{serial}"
     lines = [
         summary,
         "",
@@ -241,7 +246,8 @@ def main(state_path: Path | None = None):
     state_path = state_path or DEFAULT_STATE_PATH
     try:
         state = read_state(state_path)
-        _log(f"state_loaded last_seen_sha={state['last_seen_sha']}")
+        email_count = state["email_count"]
+        _log(f"state_loaded last_seen_sha={state['last_seen_sha']} email_count={email_count}")
         gh_token = os.environ.get("GH_TOKEN")
         commits = fetch_new_commits(UPSTREAM_REPO, UPSTREAM_BRANCH, state["last_seen_sha"], gh_token)
         _log(f"commits_found={len(commits)}")
@@ -259,7 +265,7 @@ def main(state_path: Path | None = None):
 
         if should_skip(bundle["num_files"], bundle["total_bytes"]):
             _log("skip_rule_triggered")
-            write_state(state_path, latest_commit["sha"], now)
+            write_state(state_path, latest_commit["sha"], now, email_count)
             _log(f"state_advanced sha={latest_commit['sha']}")
             return 0
 
@@ -275,11 +281,12 @@ def main(state_path: Path | None = None):
         _log(f"llm_result has_issues={parsed['has_issues']} findings={findings_count}")
 
         if parsed["has_issues"]:
+            serial = email_count + 1
             subject, body = render_email(
-                parsed["findings"], parsed["summary"], latest_commit, repo=UPSTREAM_REPO
+                parsed["findings"], parsed["summary"], latest_commit, UPSTREAM_REPO, serial
             )
             masked_recipient = _mask_email(os.environ["RECIPIENT_EMAIL"])
-            _log(f"email_send_start to={masked_recipient} findings={findings_count}")
+            _log(f"email_send_start to={masked_recipient} findings={findings_count} serial={serial}")
             send_email(
                 SMTP_HOST,
                 SMTP_PORT,
@@ -289,9 +296,10 @@ def main(state_path: Path | None = None):
                 subject,
                 body,
             )
-            _log(f"email_send_success to={masked_recipient}")
+            _log(f"email_send_success to={masked_recipient} serial={serial}")
+            email_count = serial
 
-        write_state(state_path, latest_commit["sha"], now)
+        write_state(state_path, latest_commit["sha"], now, email_count)
         _log(f"state_advanced sha={latest_commit['sha']}")
         return 0
     except Exception as exc:

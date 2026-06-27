@@ -29,24 +29,33 @@ SAMPLE_SUMMARY = "Two small consistency notes from this batch."
 
 def test_render_email_returns_subject_and_body():
     subject, body = check.render_email(
-        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, repo="davidmalawey/openLab"
+        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, "davidmalawey/openLab", 48
     )
 
     assert isinstance(subject, str) and subject
     assert isinstance(body, str) and body
 
 
-def test_subject_contains_short_sha():
+def test_subject_names_the_tool_and_includes_serial():
     subject, _ = check.render_email(
-        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, repo="davidmalawey/openLab"
+        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, "davidmalawey/openLab", 48
     )
 
-    assert "61fff5a" in subject
+    assert "openLab Watcher" in subject
+    assert "#48" in subject
+
+
+def test_subject_does_not_leak_commit_sha():
+    subject, _ = check.render_email(
+        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, "davidmalawey/openLab", 48
+    )
+
+    assert "61fff5a" not in subject
 
 
 def test_body_includes_summary_and_each_finding_message():
     _, body = check.render_email(
-        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, repo="davidmalawey/openLab"
+        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, "davidmalawey/openLab", 48
     )
 
     assert SAMPLE_SUMMARY in body
@@ -57,7 +66,7 @@ def test_body_includes_summary_and_each_finding_message():
 
 def test_body_links_each_finding_to_github_blob_url():
     _, body = check.render_email(
-        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, repo="davidmalawey/openLab"
+        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, "davidmalawey/openLab", 48
     )
 
     for f in SAMPLE_FINDINGS:
@@ -68,7 +77,7 @@ def test_body_links_each_finding_to_github_blob_url():
 
 def test_body_distinguishes_severity_levels():
     _, body = check.render_email(
-        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, repo="davidmalawey/openLab"
+        SAMPLE_FINDINGS, SAMPLE_SUMMARY, SAMPLE_LATEST_COMMIT, "davidmalawey/openLab", 48
     )
 
     lowered = body.lower()
