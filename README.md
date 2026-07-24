@@ -17,6 +17,8 @@ Every scheduled run:
 7. Sends an email only if Claude returns `has_issues: true`. Each email subject is `[openLab Watcher] #<n>`, where `<n>` is a serial number that increments by one per delivered email so the recipient can see the order at a glance.
 8. Advances `state.json` and commits it back to this repository from GitHub Actions.
 
+If the model response comes back truncated or partially malformed, the run degrades instead of failing: `max_tokens` is 8192 with one retry on truncation; a partial payload is salvaged (well-formed findings kept, broken ones dropped) and emailed with an explicit "report was cut short" note plus a compare link to the full change set; a totally unusable response still emails a minimal factual note with the commit count and compare link. All of these degraded runs advance state and exit 0. Only infrastructure failures (GitHub API, Anthropic API/network, SMTP) fail the workflow loudly with state untouched, so the next run retries the same batch.
+
 The scheduled workflow scans once a week, Thursday at 9(ish) AM Central time (+/- daylight saving), and can also be triggered manually from GitHub Actions.
 
 ## Repository Context
@@ -94,13 +96,17 @@ The run logs intentionally include minimal diagnostics:
 
 ```text
 openlab-watcher: commits_found=...
-openlab-watcher: llm_result has_issues=... findings=...
+openlab-watcher: llm_response stop_reason=... input_tokens=... output_tokens=...
+openlab-watcher: llm_result has_issues=... findings=... complete=...
+openlab-watcher: rung=0|2|3
 openlab-watcher: email_send_success to=d***@example.com serial=...
 ```
 
+`rung` records how the run degraded: 0 = normal full review, 2 = salvaged a partial model response, 3 = model response unusable, minimal factual email sent.
+
 Recipient addresses are masked in logs. Secrets are never printed.
 
-No Anthropic tokens are used when there are no new upstream commits. No email is sent unless Claude reports at least one finding.
+No Anthropic tokens are used when there are no new upstream commits. On a normal complete review, no email is sent unless Claude reports at least one finding; degraded runs (rung 2 or 3) always email, because a truncated "no issues" cannot be trusted.
 
 ## Development
 

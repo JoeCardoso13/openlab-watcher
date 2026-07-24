@@ -62,11 +62,12 @@ def _llm_with_issues():
         "findings": [
             {"severity": "nudge", "file": "tools.md", "message": "msg", "suggestion": "sug"},
         ],
+        "complete": True,
     }
 
 
 def _llm_clean():
-    return {"has_issues": False, "summary": "All looks consistent.", "findings": []}
+    return {"has_issues": False, "summary": "All looks consistent.", "findings": [], "complete": True}
 
 
 # ---------- scenarios ---------- #
@@ -280,7 +281,9 @@ def test_smtp_error_exits_nonzero_and_state_unchanged(monkeypatch, state_path):
     assert state["last_seen_sha"] == "olds123"
 
 
-def test_malformed_llm_response_exits_nonzero_and_state_unchanged(monkeypatch, state_path):
+def test_unusable_llm_response_degrades_to_fallback_email(monkeypatch, state_path):
+    """Rung 3: the model returned nothing usable, but the cron run still
+    succeeds — David gets a minimal factual email and state advances."""
     commits = _two_commits()
     monkeypatch.setattr(check, "fetch_new_commits", lambda *a, **kw: commits)
     monkeypatch.setattr(check, "fetch_diff_and_context", lambda *a, **kw: _diff_bundle())
@@ -288,7 +291,7 @@ def test_malformed_llm_response_exits_nonzero_and_state_unchanged(monkeypatch, s
     monkeypatch.setattr(check, "call_llm", lambda *a, **kw: object())
 
     def boom(_raw):
-        raise ValueError("model did not call the tool")
+        raise check.MalformedLLMResponse("model did not call report_findings")
 
     monkeypatch.setattr(check, "parse_llm_response", boom)
     send = MagicMock()
@@ -296,7 +299,7 @@ def test_malformed_llm_response_exits_nonzero_and_state_unchanged(monkeypatch, s
 
     rc = check.main(state_path=state_path)
 
-    assert rc != 0
-    send.assert_not_called()
+    assert rc == 0
+    send.assert_called_once()
     state = json.loads(state_path.read_text())
-    assert state["last_seen_sha"] == "olds123"
+    assert state["last_seen_sha"] == commits[-1]["sha"]

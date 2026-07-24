@@ -25,10 +25,16 @@ CONVENTIONS_PATH = Path(__file__).resolve().parents[1] / "prompts" / "convention
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 TREE_INCLUDE_PREFIXES = ("manuals/", "docs/", "ref/")
+LLM_MAX_TOKENS = 8192
+
+CONTACT_NOTE = (
+    "If this problem persists, and/or is bothering you, please contact "
+    "Joe Cardoso, the master of *agent* puppets, he'll be happy to help."
+)
 
 
 class MalformedLLMResponse(ValueError):
-    """Raised when the model response cannot be parsed against the expected tool-use schema."""
+    """Raised only when the model response contains no report_findings tool call at all."""
 
 
 def read_state(path):
@@ -162,9 +168,17 @@ def build_prompt(stable_ctx, diff, edited_md, sibling_lists):
 
 def call_llm(messages, api_key):
     client = anthropic.Anthropic(api_key=api_key)
+    response = _create_message(client, messages)
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        _log("llm_truncated_retry")
+        response = _create_message(client, messages)
+    return response
+
+
+def _create_message(client, messages):
     return client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1200,
+        max_tokens=LLM_MAX_TOKENS,
         messages=messages,
         tools=[
             {
@@ -201,11 +215,11 @@ def parse_llm_response(raw):
     for block in getattr(raw, "content", []):
         if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "report_findings":
             payload = getattr(block, "input", None)
-            return _validate_llm_payload(payload)
+            return _salvage_llm_payload(payload)
     raise MalformedLLMResponse("model did not call report_findings")
 
 
-def render_email(findings, summary, latest_commit, repo, serial):
+def render_email(findings, summary, latest_commit, repo, serial, complete=True, compare_url=None):
     subject = f"[openLab Watcher] #{serial}"
     lines = [
         summary,
@@ -214,6 +228,13 @@ def render_email(findings, summary, latest_commit, repo, serial):
         latest_commit.get("url", ""),
         "",
     ]
+    if not complete:
+        lines.extend(
+            [
+                "Note: this report was cut short, so some findings may be missing.",
+                "",
+            ]
+        )
     for finding in findings:
         file_path = finding["file"]
         blob_url = f"https://github.com/{repo}/blob/{latest_commit['sha']}/{file_path}"
@@ -226,7 +247,32 @@ def render_email(findings, summary, latest_commit, repo, serial):
                 "",
             ]
         )
+    if not complete:
+        lines.extend(
+            [
+                "You can review the full change set here:",
+                compare_url or "",
+                "",
+                CONTACT_NOTE,
+            ]
+        )
     return subject, "\n".join(lines).strip() + "\n"
+
+
+def render_fallback_email(commit_count, compare_url, serial):
+    subject = f"[openLab Watcher] #{serial}"
+    body = "\n".join(
+        [
+            f"openLab had {commit_count} new commit(s) this week, but the automated "
+            "reviewer couldn't produce consistency notes this time.",
+            "",
+            "You can review the full change set here:",
+            compare_url,
+            "",
+            CONTACT_NOTE,
+        ]
+    )
+    return subject, body + "\n"
 
 
 def send_email(smtp_host, smtp_port, smtp_user, smtp_password, to_addr, subject, body):
@@ -276,27 +322,43 @@ def main(state_path: Path | None = None):
             bundle["sibling_lists"],
         )
         raw = call_llm(messages, os.environ["ANTHROPIC_API_KEY"])
-        parsed = parse_llm_response(raw)
-        findings_count = len(parsed["findings"])
-        _log(f"llm_result has_issues={parsed['has_issues']} findings={findings_count}")
+        _log_llm_response(raw)
+        compare_url = (
+            f"https://github.com/{UPSTREAM_REPO}/compare/"
+            f"{commits[0]['sha']}~1...{latest_commit['sha']}"
+        )
 
-        if parsed["has_issues"]:
+        try:
+            parsed = parse_llm_response(raw)
+        except MalformedLLMResponse as exc:
+            _log(f"llm_unusable {exc}")
+            _log("rung=3")
+            serial = email_count + 1
+            subject, body = render_fallback_email(len(commits), compare_url, serial)
+            _deliver(subject, body, serial, findings_count=0)
+            email_count = serial
+            write_state(state_path, latest_commit["sha"], now, email_count)
+            _log(f"state_advanced sha={latest_commit['sha']}")
+            return 0
+
+        findings_count = len(parsed["findings"])
+        complete = parsed.get("complete", True)
+        _log(f"llm_result has_issues={parsed['has_issues']} findings={findings_count} complete={complete}")
+        _log(f"rung={0 if complete else 2}")
+
+        # An incomplete response always emails: a truncated "no issues" can't be trusted.
+        if parsed["has_issues"] or not complete:
             serial = email_count + 1
             subject, body = render_email(
-                parsed["findings"], parsed["summary"], latest_commit, UPSTREAM_REPO, serial
+                parsed["findings"],
+                parsed["summary"],
+                latest_commit,
+                UPSTREAM_REPO,
+                serial,
+                complete=complete,
+                compare_url=compare_url,
             )
-            masked_recipient = _mask_email(os.environ["RECIPIENT_EMAIL"])
-            _log(f"email_send_start to={masked_recipient} findings={findings_count} serial={serial}")
-            send_email(
-                SMTP_HOST,
-                SMTP_PORT,
-                os.environ["SMTP_USER"],
-                os.environ["SMTP_PASSWORD"],
-                os.environ["RECIPIENT_EMAIL"],
-                subject,
-                body,
-            )
-            _log(f"email_send_success to={masked_recipient} serial={serial}")
+            _deliver(subject, body, serial, findings_count)
             email_count = serial
 
         write_state(state_path, latest_commit["sha"], now, email_count)
@@ -309,6 +371,31 @@ def main(state_path: Path | None = None):
 
 def _log(message):
     print(f"openlab-watcher: {message}", flush=True)
+
+
+def _log_llm_response(raw):
+    stop_reason = getattr(raw, "stop_reason", None)
+    usage = getattr(raw, "usage", None)
+    _log(
+        f"llm_response stop_reason={stop_reason} "
+        f"input_tokens={getattr(usage, 'input_tokens', None)} "
+        f"output_tokens={getattr(usage, 'output_tokens', None)}"
+    )
+
+
+def _deliver(subject, body, serial, findings_count):
+    masked_recipient = _mask_email(os.environ["RECIPIENT_EMAIL"])
+    _log(f"email_send_start to={masked_recipient} findings={findings_count} serial={serial}")
+    send_email(
+        SMTP_HOST,
+        SMTP_PORT,
+        os.environ["SMTP_USER"],
+        os.environ["SMTP_PASSWORD"],
+        os.environ["RECIPIENT_EMAIL"],
+        subject,
+        body,
+    )
+    _log(f"email_send_success to={masked_recipient} serial={serial}")
 
 
 def _mask_email(address):
@@ -421,40 +508,56 @@ def _include_tree_path(path, item_type):
     )
 
 
-def _validate_llm_payload(payload):
+def _salvage_llm_payload(payload):
+    """Keep every well-formed part of a possibly truncated payload.
+
+    A partial response (e.g. output cut at max_tokens) must never cost the run:
+    salvage what arrived, mark the result complete=False, and let the caller
+    disclose the gap instead of discarding usable analysis.
+    """
     if not isinstance(payload, dict):
-        raise MalformedLLMResponse("tool payload is not an object")
-    required = {"has_issues", "summary", "findings"}
-    if not required.issubset(payload):
-        missing = ", ".join(sorted(required - set(payload)))
-        raise MalformedLLMResponse(f"tool payload missing keys: {missing}")
-    if not isinstance(payload["has_issues"], bool):
-        raise MalformedLLMResponse("has_issues must be a boolean")
-    if not isinstance(payload["summary"], str):
-        raise MalformedLLMResponse("summary must be a string")
-    if not isinstance(payload["findings"], list):
-        raise MalformedLLMResponse("findings must be a list")
+        payload = {}
+    complete = isinstance(payload.get("has_issues"), bool)
+    has_issues = payload["has_issues"] if complete else True
+
+    summary = payload.get("summary")
+    if not isinstance(summary, str):
+        summary = ""
+        complete = False
+
+    raw_findings = payload.get("findings")
+    if not isinstance(raw_findings, list):
+        raw_findings = []
+        complete = False
 
     findings = []
-    for finding in payload["findings"]:
-        if not isinstance(finding, dict):
-            raise MalformedLLMResponse("finding must be an object")
-        finding_required = {"severity", "file", "message", "suggestion"}
-        if not finding_required.issubset(finding):
-            missing = ", ".join(sorted(finding_required - set(finding)))
-            raise MalformedLLMResponse(f"finding missing keys: {missing}")
-        if finding["severity"] not in {"nudge", "concern"}:
-            raise MalformedLLMResponse(f"invalid severity: {finding['severity']}")
-        normalized = {key: finding[key] for key in finding_required}
-        if not all(isinstance(value, str) and value for value in normalized.values()):
-            raise MalformedLLMResponse("finding fields must be non-empty strings")
-        findings.append(normalized)
+    for finding in raw_findings:
+        normalized = _well_formed_finding(finding)
+        if normalized is None:
+            complete = False
+        else:
+            findings.append(normalized)
 
     return {
-        "has_issues": payload["has_issues"],
-        "summary": payload["summary"],
+        "has_issues": has_issues,
+        "summary": summary,
         "findings": findings,
+        "complete": complete,
     }
+
+
+def _well_formed_finding(finding):
+    if not isinstance(finding, dict):
+        return None
+    required = ("severity", "file", "message", "suggestion")
+    if not all(key in finding for key in required):
+        return None
+    if finding["severity"] not in {"nudge", "concern"}:
+        return None
+    normalized = {key: finding[key] for key in required}
+    if not all(isinstance(value, str) and value for value in normalized.values()):
+        return None
+    return normalized
 
 
 if __name__ == "__main__":
