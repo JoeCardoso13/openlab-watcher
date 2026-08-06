@@ -20,12 +20,20 @@ CONTACT_NOTE = (
     "Joe Cardoso, the master of *agent* puppets, he'll be happy to help."
 )
 
-SAMPLE_COMMIT = {
-    "sha": "newsha2def",
-    "short_sha": "newsha2",
-    "message": "Update tour.md",
-    "url": "https://github.com/davidmalawey/openLab/commit/newsha2def",
-}
+SAMPLE_COMMITS = [
+    {
+        "sha": "newsha1abc",
+        "short_sha": "newsha1",
+        "message": "Update tools.md",
+        "url": "https://github.com/davidmalawey/openLab/commit/newsha1abc",
+    },
+    {
+        "sha": "newsha2def",
+        "short_sha": "newsha2",
+        "message": "Update tour.md",
+        "url": "https://github.com/davidmalawey/openLab/commit/newsha2def",
+    },
+]
 
 SAMPLE_FINDING = {
     "severity": "nudge",
@@ -44,7 +52,7 @@ def _render_degraded():
     return check.render_email(
         [SAMPLE_FINDING],
         "One salvaged note.",
-        SAMPLE_COMMIT,
+        SAMPLE_COMMITS,
         "davidmalawey/openLab",
         4,
         complete=False,
@@ -87,10 +95,17 @@ def test_degraded_email_still_carries_salvaged_content():
 
 
 def test_complete_email_has_no_degradation_notes():
+    """A complete email carries the compare link too, but none of the apology."""
     _, body = check.render_email(
-        [SAMPLE_FINDING], "All good.", SAMPLE_COMMIT, "davidmalawey/openLab", 4
+        [SAMPLE_FINDING],
+        "All good.",
+        SAMPLE_COMMITS,
+        "davidmalawey/openLab",
+        4,
+        compare_url=COMPARE_URL,
     )
 
+    assert COMPARE_URL in body
     assert "cut short" not in body.lower()
     assert CONTACT_NOTE not in body
 

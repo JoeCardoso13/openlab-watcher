@@ -1,0 +1,52 @@
+This page is for tools & supplies used in the lab, which meet expectations & are recommended for other makers.  Treat this page as an index of parts while the Lab Tour shows how the parts are arranged in the lab and integrated into processes.
+
+>
+> Jump to a Section:
+>
+> ➡️ [Key Tools](#keytools), [Cordless Power Tools](#cordlesspower), [Instruments](#instruments), [Supplies](#supplies), [Computing](#computing), [Safety](#safety), [Facility](#facility), or [Data](#data)
+>
+
+---
+
+## Admin
+Admin tools are for typical business administration, but we focus extra on 5S & communication.  This particular labeler choice is important because it's sold in high volume globally.  It prints incredibly fast and reliably and you can find many cheap distributors of compatible sticker-label-spools.  The downside is Dymo's upgrade from model 450 included addition of an RFID tracking sensor that attempts to lock-down the printer for pricey dymo-only spools.  It's one of the only items that has a performance good enough to tolerate nasty business antics as noted.
+
+* Labeler, Dymo 550 [on amazon for $120](https://amzn.to/3Zqdt9n)
+* Scanner, Epson [ES530 for $360](https://amzn.to/4kEvB8y) is the nearest match for my DS-510 that is discontinued.
+* Handheld label printer [Brother PTD220 $45 on amazon](https://amzn.to/3XdOtAO) is recommended
+* Thermal Laminator, 3M's Scotch [Model TL902 for $60 on amazon](https://amzn.to/41ro0BY) is recommended 
+
+- ![admin station](img/station_admin1.jpg)
+- ![dymo labeler image](img/img_dymoPrinter.jpg)
+- ![epson scanner](img/img_epsonScanner.jpg)
+- ![brother labeler, portable](img/img_brotherLabeler.jpg)
+- ![scotch laminator](img/img_scotchLaminator.jpg)
+- ![placeholder](img/placeholder.jpg)
+
+## Marking
+Over 10 years went into evaluating the best marking tools for the lab.  The main needs are labeling supplies, adding measurements on items, dating materials for expiration, or traceability between documentation and in-hand devices.  See the 40-min video on Youtube called [The Engineer-recommended Marking Utensils](https://youtu.be/cZhGhAM_frs) or watch the embedded video below. Some markers & pens featured in this video are the following:
+
+* Shop my Amazon List [Marking Tools for OpenLab](https://amzn.to/4w8oslF)
+* [Frixion Pens 3-color](https://amzn.to/3RHJFE3)
+* [Pilot Precise 4-colors](https://amzn.to/4prl9mV)
+* [Carpenter's pencils](https://amzn.to/4wWGkAb)
+* [Sharpie Industrial 3pc](https://amzn.to/4fi8Ogy)
+* [Scribe 2pc, Carbide](https://amzn.to/3RvbHm7)
+* [Silver Sharpie 2pcs](https://amzn.to/4vuHLVb)
+* [Autoclave Tape 12pcs](https://amzn.to/3RcnRAf)
+* [White Nail Polish](https://amzn.to/3SYLgWi)
+* [Clear Nail Polish](https://amzn.to/4pisCF9)
+* [3M Micropore Tape](https://amzn.to/4wO7zfW)
+
+
+| Need | Recommended tool | Simple notes |
+| :--- | :--- | :--- |
+| Writing and sketching on paper | Pilot Precise V5RT | Doesn't smear easily (great for lefties) and lines scan/vectorize cleanly. |
+| Drafting with erasable ink | Pilot FriXion pens | Ink erases via friction heat; avoid storing these in a hot car. |
+| General marking on cut materials | Sharpie Industrial | Tolerates high heat (like outdoor Texas mailboxes) better than standard Sharpies. |
+| Ultra-permanent marking on metal | Markal 96520 | Better reach and less odor than Sharpie Pro, plus it has precise lab data sheets. |
+| Marking on black plastics | Silver Sharpie | Store tip-down; scuff the plastic with 320-grit sandpaper first so the ink sticks. |
+| Protecting ink on rigid plastics | Wet N Wild Clear Coat | Swipe quickly in a single stroke, otherwise the acetone will dissolve the ink. |
+| Labeling fabrics and porous items | 3M Micropore Tape | Highly flexible, resists shear forces that peel packing tape, and ink won't bleed through. |
+| Color-banding equipment handles | Autoclave Tape | Extremely thin; doesn't slowly shrink back and peel off like vinyl tape does. |
+| Color-coding tools permanently | Fingernail Polish | Tough like enamel and replaces messy p

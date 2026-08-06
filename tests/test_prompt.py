@@ -1,4 +1,9 @@
-"""Prompt construction: stable context cached, diff + edited content + siblings included."""
+"""Prompt construction: diff + edited content + siblings included, no cache surcharge.
+
+Prompt caching was removed 2026-08-06: the ephemeral cache TTL is 5 minutes
+and runs are a week apart, so the breakpoint could never be read — it only
+ever charged the 1.25x cache-write premium.
+"""
 from scripts import check
 
 
@@ -47,17 +52,17 @@ def test_build_prompt_returns_messages_list():
     assert all("role" in m and "content" in m for m in prompt)
 
 
-def test_stable_context_block_has_ephemeral_cache_control():
+def test_no_block_pays_for_prompt_caching():
     prompt = check.build_prompt(SAMPLE_STABLE, SAMPLE_DIFF, SAMPLE_EDITED, SAMPLE_SIBLINGS)
 
     cached_blocks = []
     for msg in prompt:
         content = msg["content"] if isinstance(msg["content"], list) else []
         for c in content:
-            if c.get("cache_control") == {"type": "ephemeral"}:
+            if "cache_control" in c:
                 cached_blocks.append(c)
 
-    assert len(cached_blocks) >= 1, "expected at least one block with ephemeral cache_control"
+    assert cached_blocks == [], "weekly runs can never read a 5-minute cache; drop the write premium"
 
 
 def test_stable_context_includes_conventions_and_sidebar():

@@ -15,9 +15,6 @@ from urllib.request import Request, urlopen
 import anthropic
 
 
-SKIP_FILE_THRESHOLD = 20
-SKIP_BYTE_THRESHOLD = 100_000
-
 UPSTREAM_REPO = "davidmalawey/openLab"
 UPSTREAM_BRANCH = "main"
 DEFAULT_STATE_PATH = Path("state.json")
@@ -26,6 +23,10 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 TREE_INCLUDE_PREFIXES = ("manuals/", "docs/", "ref/")
 LLM_MAX_TOKENS = 8192
+
+# Cost guardrail: a week whose prompt exceeds this never reaches the API.
+# Estimated locally (chars // 4) so the check itself costs nothing.
+MAX_INPUT_TOKENS = 200_000
 
 CONTACT_NOTE = (
     "If this problem persists, and/or is bothering you, please contact "
@@ -75,16 +76,6 @@ def fetch_new_commits(repo, branch, since_sha, gh_token):
 
 
 def fetch_diff_and_context(repo, commits, gh_token):
-    if not commits:
-        return {
-            "diff": "",
-            "edited_files": {},
-            "sibling_lists": {},
-            "stable_ctx": _fetch_stable_context(repo, gh_token),
-            "num_files": 0,
-            "total_bytes": 0,
-        }
-
     headers = _github_headers(gh_token)
     first_sha = commits[0]["sha"]
     latest_sha = commits[-1]["sha"]
@@ -119,8 +110,24 @@ def fetch_diff_and_context(repo, commits, gh_token):
     }
 
 
-def should_skip(num_files, total_diff_bytes):
-    return num_files > SKIP_FILE_THRESHOLD or total_diff_bytes > SKIP_BYTE_THRESHOLD
+def estimate_prompt_tokens(messages):
+    """Rough local token count: every text block's characters // 3.
+
+    Deliberately biased high. Measured against count_tokens on a real openLab
+    batch, the usual chars/4 rule of thumb read 25% LOW on this content
+    (markdown, filenames, diff punctuation all tokenize densely). A wallet
+    guard that reads low spends more than its budget promises, so round the
+    divisor down instead.
+    """
+    chars = 0
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                chars += len(block.get("text", ""))
+    return chars // 3
 
 
 def build_prompt(stable_ctx, diff, edited_md, sibling_lists):
@@ -153,11 +160,7 @@ def build_prompt(stable_ctx, diff, edited_md, sibling_lists):
                         "Report only concrete issues worth emailing about."
                     ),
                 },
-                {
-                    "type": "text",
-                    "text": stable_text,
-                    "cache_control": {"type": "ephemeral"},
-                },
+                {"type": "text", "text": stable_text},
                 {"type": "text", "text": f"Diff:\n{diff}"},
                 {"type": "text", "text": f"Full edited markdown files:\n{edited_text}"},
                 {"type": "text", "text": f"Sibling filenames in affected directories:\n{sibling_text}"},
@@ -219,15 +222,17 @@ def parse_llm_response(raw):
     raise MalformedLLMResponse("model did not call report_findings")
 
 
-def render_email(findings, summary, latest_commit, repo, serial, complete=True, compare_url=None):
+def render_email(findings, summary, commits, repo, serial, complete=True, compare_url=None):
+    latest_commit = commits[-1]
     subject = f"[openLab Watcher] #{serial}"
     lines = [
         summary,
         "",
-        f"Commit: {latest_commit.get('message', '')}",
-        latest_commit.get("url", ""),
-        "",
+        f"This covers {len(commits)} commit(s) from openLab this week:",
     ]
+    # Message only — David reads changes by their description, not by sha.
+    lines.extend(f"- {commit.get('message', '')}" for commit in commits)
+    lines.append("")
     if not complete:
         lines.extend(
             [
@@ -247,15 +252,14 @@ def render_email(findings, summary, latest_commit, repo, serial, complete=True, 
                 "",
             ]
         )
+    lines.extend(
+        [
+            "You can review the full change set here:",
+            compare_url or "",
+        ]
+    )
     if not complete:
-        lines.extend(
-            [
-                "You can review the full change set here:",
-                compare_url or "",
-                "",
-                CONTACT_NOTE,
-            ]
-        )
+        lines.extend(["", CONTACT_NOTE])
     return subject, "\n".join(lines).strip() + "\n"
 
 
@@ -309,11 +313,10 @@ def main(state_path: Path | None = None):
             f"files={bundle['num_files']} bytes={bundle['total_bytes']} latest_sha={latest_commit['sha']}"
         )
 
-        if should_skip(bundle["num_files"], bundle["total_bytes"]):
-            _log("skip_rule_triggered")
-            write_state(state_path, latest_commit["sha"], now, email_count)
-            _log(f"state_advanced sha={latest_commit['sha']}")
-            return 0
+        compare_url = (
+            f"https://github.com/{UPSTREAM_REPO}/compare/"
+            f"{commits[0]['sha']}~1...{latest_commit['sha']}"
+        )
 
         messages = build_prompt(
             bundle["stable_ctx"],
@@ -321,12 +324,22 @@ def main(state_path: Path | None = None):
             bundle["edited_files"],
             bundle["sibling_lists"],
         )
+        estimated_tokens = estimate_prompt_tokens(messages)
+        _log(f"prompt_tokens_estimated tokens={estimated_tokens} budget={MAX_INPUT_TOKENS}")
+
+        # Too big to review: say so out loud rather than swallowing the week.
+        if estimated_tokens > MAX_INPUT_TOKENS:
+            _log(f"token_guard_triggered tokens={estimated_tokens} budget={MAX_INPUT_TOKENS}")
+            serial = email_count + 1
+            subject, body = render_fallback_email(len(commits), compare_url, serial)
+            _deliver(subject, body, serial, findings_count=0)
+            email_count = serial
+            write_state(state_path, latest_commit["sha"], now, email_count)
+            _log(f"state_advanced sha={latest_commit['sha']}")
+            return 0
+
         raw = call_llm(messages, os.environ["ANTHROPIC_API_KEY"])
         _log_llm_response(raw)
-        compare_url = (
-            f"https://github.com/{UPSTREAM_REPO}/compare/"
-            f"{commits[0]['sha']}~1...{latest_commit['sha']}"
-        )
 
         try:
             parsed = parse_llm_response(raw)
@@ -352,7 +365,7 @@ def main(state_path: Path | None = None):
             subject, body = render_email(
                 parsed["findings"],
                 parsed["summary"],
-                latest_commit,
+                commits,
                 UPSTREAM_REPO,
                 serial,
                 complete=complete,

@@ -90,26 +90,6 @@ def test_no_new_commits_exits_zero_and_skips_everything(monkeypatch, state_path)
     send.assert_not_called()
 
 
-def test_skip_rule_advances_state_without_calling_llm(monkeypatch, state_path):
-    commits = _two_commits()
-    monkeypatch.setattr(check, "fetch_new_commits", lambda *a, **kw: commits)
-    monkeypatch.setattr(
-        check, "fetch_diff_and_context", lambda *a, **kw: _diff_bundle(num_files=999, total_bytes=1)
-    )
-    call_llm = MagicMock()
-    send = MagicMock()
-    monkeypatch.setattr(check, "call_llm", call_llm)
-    monkeypatch.setattr(check, "send_email", send)
-
-    rc = check.main(state_path=state_path)
-
-    assert rc == 0
-    call_llm.assert_not_called()
-    send.assert_not_called()
-    new_state = json.loads(state_path.read_text())
-    assert new_state["last_seen_sha"] == commits[-1]["sha"]
-
-
 def test_llm_clean_advances_state_and_sends_no_email(monkeypatch, state_path):
     commits = _two_commits()
     monkeypatch.setattr(check, "fetch_new_commits", lambda *a, **kw: commits)

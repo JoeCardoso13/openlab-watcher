@@ -12,7 +12,7 @@ Every scheduled run:
 2. Asks the GitHub API for commits after that SHA.
 3. Exits immediately if there are no new commits.
 4. Fetches the diff, edited markdown files, nearby sibling filenames, sidebar/navbar files, and a compact repository tree.
-5. Skips bulk changes above the configured file/byte thresholds.
+5. Estimates the prompt size locally (characters / 3, a deliberately conservative token ratio). If it exceeds `MAX_INPUT_TOKENS` (200,000), the run skips the paid model call and emails the commit count plus a compare link instead, so an oversized week is never silently swallowed.
 6. Sends the change context to Claude using a forced structured-output tool.
 7. Sends an email only if Claude returns `has_issues: true`. Each email subject is `[openLab Watcher] #<n>`, where `<n>` is a serial number that increments by one per delivered email so the recipient can see the order at a glance.
 8. Advances `state.json` and commits it back to this repository from GitHub Actions.
@@ -96,6 +96,9 @@ The run logs intentionally include minimal diagnostics:
 
 ```text
 openlab-watcher: commits_found=...
+openlab-watcher: diff_context files=... bytes=... latest_sha=...
+openlab-watcher: prompt_tokens_estimated tokens=... budget=200000
+openlab-watcher: token_guard_triggered tokens=... budget=200000   (only when over budget)
 openlab-watcher: llm_response stop_reason=... input_tokens=... output_tokens=...
 openlab-watcher: llm_result has_issues=... findings=... complete=...
 openlab-watcher: rung=0|2|3
@@ -103,6 +106,8 @@ openlab-watcher: email_send_success to=d***@example.com serial=...
 ```
 
 `rung` records how the run degraded: 0 = normal full review, 2 = salvaged a partial model response, 3 = model response unusable, minimal factual email sent.
+
+Compare `prompt_tokens_estimated` against the `input_tokens` on the following `llm_response` line to see how the local estimate is tracking reality. The estimate is deliberately biased high — measured against live openLab content it runs about 6% above the real tokenizer, so the guard trips slightly early rather than slightly late. `tests/live/test_token_estimate_live.py` re-checks that margin against the real API; run it after any change to `build_prompt`, the model, or the divisor.
 
 Recipient addresses are masked in logs. Secrets are never printed.
 
